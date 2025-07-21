@@ -43,22 +43,64 @@ export function metaWebhookAdapter({ verifyTokenEnv, querySchema, bodySchema, pr
 
       const { entry } = value;
       const eventPromises = entry.map(async (entryItem) => {
-        const webhookEvents = entryItem.messaging;
-        for (const webhookEvent of webhookEvents) {
+        // Handle different webhook structures for different platforms
+        let webhookEvents = [];
+        
+        if (entryItem.messaging) {
+          // Facebook/Instagram format
+          webhookEvents = entryItem.messaging;
+        } else if (entryItem.changes) {
+          // WhatsApp format
+          webhookEvents = entryItem.changes;
+        } else {
+          logger.warn("Unknown webhook format", { entryItem });
+          return;
+        }
+
+        // Process all webhook events in this entry
+        const webhookEventPromises = webhookEvents.map(async (webhookEvent) => {
+          // Skip non-processable events (delivery confirmations, read receipts, etc.)
+          const isProcessableEvent = webhookEvent.message || webhookEvent.postback || webhookEvent.value?.messages;
+          if (!isProcessableEvent) {
+            logger.debug("Skipping non-processable event", { 
+              eventType: Object.keys(webhookEvent).filter(key => !['sender', 'recipient', 'timestamp'].includes(key)),
+              senderId: webhookEvent.sender?.id 
+            });
+            return;
+          }
+
           logger.info("Raw webhook POST received", { body: req.body });
           logger.info("Meta Webhook event received", {
-            eventId: webhookEvent.message?.mid,
-            timestamp: webhookEvent.timestamp
+            eventId: webhookEvent.message?.mid || webhookEvent.value?.messages?.[0]?.id,
+            timestamp: webhookEvent.timestamp || webhookEvent.value?.messages?.[0]?.timestamp
           });
           try {
-            await processEvent(webhookEvent);
+            // Normalize WhatsApp webhook events to Facebook format for WhatsApp service
+            let normalizedEvent = webhookEvent;
+            if (webhookEvent.value?.messages) {
+              // WhatsApp format - convert to Facebook format
+              const whatsappMessage = webhookEvent.value.messages[0];
+              normalizedEvent = {
+                sender: { id: whatsappMessage.from },
+                timestamp: whatsappMessage.timestamp,
+                message: {
+                  mid: whatsappMessage.id,
+                  text: whatsappMessage.text?.body
+                }
+              };
+            }
+            
+            await processEvent(normalizedEvent);
           } catch (error) {
             logger.error("Error processing webhook event", {
               error: error.message,
-              eventId: webhookEvent.message?.mid
+              eventId: webhookEvent.message?.mid || webhookEvent.value?.messages?.[0]?.id
             });
           }
-        }
+        });
+
+        // Wait for all webhook events in this entry to complete
+        await Promise.all(webhookEventPromises);
       });
 
       await Promise.all(eventPromises);

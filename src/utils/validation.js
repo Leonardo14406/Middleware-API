@@ -36,9 +36,9 @@ export const facebookBodySchema = Joi.object({
                 payload: Joi.string().required(),
                 title: Joi.string().optional()
               }).unknown(true).optional(),
-              delivery: Joi.object().optional(),
-              read: Joi.object().optional()
-            }).unknown(true).xor('message', 'postback').optional()
+              delivery: Joi.object().unknown(true).optional(),
+              read: Joi.object().unknown(true).optional()
+            }).unknown(true)
           )
           .min(1)
           .required()
