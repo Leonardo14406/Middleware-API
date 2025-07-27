@@ -4,3 +4,6 @@ error.log
 node_modules/
 
 /src/generated/prisma
+bun.lock
+yarn.lock
+

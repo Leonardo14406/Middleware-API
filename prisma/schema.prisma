@@ -14,10 +14,47 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
-model InstagramAccount {
-  id           Int      @id @default(autoincrement())
-  instagramId  String   @unique
-  accessToken  String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+
+model Business {
+  id         String   @id @default(cuid())
+  igUsername String   @unique
+  chatbotId  String
+  email      String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  // Relations
+  session    Session?
+  messages   Message[]
+  
+  @@map("businesses")
+}
+
+model Session {
+  id                String   @id @default(cuid())
+  businessId        String   @unique
+  serializedCookies String   @db.Text
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  // Relations
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  
+  @@map("sessions")
+}
+
+model Message {
+  id         String   @id @default(cuid())
+  businessId String
+  threadId   String
+  messageId  String
+  content    String   @db.Text
+  isIncoming Boolean  @default(true)
+  timestamp  DateTime @default(now())
+  createdAt  DateTime @default(now())
+  
+  // Relations
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  
+  @@map("messages")
 }
