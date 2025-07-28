@@ -16,45 +16,53 @@ datasource db {
 
 
 model Business {
-  id         String   @id @default(cuid())
-  igUsername String   @unique
+  id         String    @id @default(cuid())
+  igUsername String    @unique
   chatbotId  String
   email      String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
   // Relations
-  session    Session?
+  sessions   Session[]
   messages   Message[]
-  
+
   @@map("businesses")
 }
 
 model Session {
-  id                String   @id @default(cuid())
-  businessId        String   @unique
-  serializedCookies String   @db.Text
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  
+  id                String    @id @default(cuid())
+  businessId        String
+  platform          Platform
+  serializedCookies String    @db.Text
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
   // Relations
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  
+
+  @@unique([businessId, platform]) // One session per platform per business
   @@map("sessions")
 }
 
 model Message {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   businessId String
   threadId   String
   messageId  String
-  content    String   @db.Text
-  isIncoming Boolean  @default(true)
-  timestamp  DateTime @default(now())
-  createdAt  DateTime @default(now())
-  
+  content    String    @db.Text
+  isIncoming Boolean   @default(true)
+  timestamp  DateTime  @default(now())
+  createdAt  DateTime  @default(now())
+
   // Relations
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  
+
   @@map("messages")
+}
+
+// Enums
+enum Platform {
+  INSTAGRAM
+  FACEBOOK
 }

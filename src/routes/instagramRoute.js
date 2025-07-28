@@ -1,5 +1,8 @@
 import express from "express";
-import { getMessages, replyToThread } from "../controllers/instagramController.js";
+import {
+  getMessages,
+  replyToThread,
+} from "../controllers/instagramController.js";
 
 const router = express.Router();
 

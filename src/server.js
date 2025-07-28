@@ -4,6 +4,7 @@ import helmet from "helmet";
 import dotenv from "dotenv";
 import businessRoutes from "./routes/businessRoutes.js";
 import instagramRoutes from "./routes/instagramRoute.js";
+import facebookRoutes from "./routes/facebookRoute.js";
 import { pollingService } from "./services/pollingService.js";
 import { logger } from "./utils/logger.js";
 
@@ -19,6 +20,7 @@ app.use(express.urlencoded({ extended: true }));
 // Routes
 app.use("/business", businessRoutes);
 app.use("/instagram", instagramRoutes);
+app.use("/facebook", facebookRoutes);
 
 // Global error handler
 app.use((err, req, res, next) => {
