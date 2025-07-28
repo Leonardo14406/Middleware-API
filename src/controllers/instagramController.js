@@ -1,4 +1,5 @@
 import prisma from "../config/db.js";
+import { webChatSocketService } from "../services/webChatSocketService.js";
 import { logger } from "../utils/logger.js";
 import {
   ensureClient,
@@ -47,6 +48,20 @@ export async function replyToThread(req, res) {
 
     const client = await ensureClient(businessId, business.instagramSession);
     await sendMessage(client, threadId, text);
+
+    // Broadcast message via WebSocket
+    webChatSocketService.broadcastMessage({
+      type: 'manual_message_sent',
+      data: {
+        businessId,
+        platform: 'instagram',
+        threadId,
+        content: text,
+        timestamp: new Date(),
+        isIncoming: false,
+        sender: 'Manual'
+      }
+    });
 
     res.status(200).json({ message: "Message sent successfully" });
   } catch (err) {

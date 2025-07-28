@@ -1,6 +1,6 @@
 import instagramService from "./instagramService.js";
 import facebookService from "./facebookService.js";
-import { chatbotService } from "./chatbotService.js";
+import { webChatSocketService } from "./webChatSocketService.js";
 import { logger } from "../utils/logger.js";
 import prisma from "../config/db.js";
 
@@ -71,6 +71,8 @@ class PollingService {
             },
           });
 
+          // Broadcast new message via WebSocket
+          this.broadcastNewMessage(business, msg, "instagram");
           await this.processMessage(business, msg, "instagram");
         }
       }
@@ -109,6 +111,8 @@ class PollingService {
             },
           });
 
+          // Broadcast new message via WebSocket
+          this.broadcastNewMessage(business, msg, "facebook");
           await this.processMessage(business, msg, "facebook");
         }
       }
@@ -122,17 +126,23 @@ class PollingService {
 
   async processMessage(business, msg, platform) {
     try {
-      const reply = await chatbotService.sendMessage(
+      // Broadcast the incoming message first
+      this.broadcastNewMessage(business, msg, platform);
+
+      // Forward the message to Genistudio via WebSocket (streaming response)
+      const reply = await webChatSocketService.forwardPlatformMessageToGenistudio(
         business.chatbotId,
-        msg.content,
         {
-          businessId: business.id,
+          content: msg.content,
           threadId: msg.threadId,
-          platform,
+          email: business.email,
+          timestamp: msg.timestamp
         },
+        platform
       );
 
       if (reply) {
+        // Send the reply back to the platform
         if (platform === "instagram") {
           const client = await instagramService.ensureClient(
             business.id,
@@ -159,12 +169,77 @@ class PollingService {
             platform,
           },
         });
+
+        // Broadcast bot reply via WebSocket
+        this.broadcastBotReply(business, msg, reply, platform);
       }
     } catch (error) {
       logger.logError(error, {
         context: `Reply failed on ${platform}`,
         businessId: business.id,
         threadId: msg.threadId,
+      });
+    }
+  }
+
+  // Broadcast new incoming message to WebSocket clients
+  broadcastNewMessage(business, msg, platform) {
+    try {
+      webChatSocketService.broadcastToBusinessClients(business.chatbotId, {
+        type: 'platform_message',
+        data: {
+          businessId: business.id,
+          platform: platform,
+          threadId: msg.threadId,
+          messageId: msg.messageId,
+          content: msg.content,
+          timestamp: msg.timestamp,
+          isIncoming: true,
+          sender: platform === 'instagram' ? 'Instagram User' : 'Facebook User'
+        }
+      });
+
+      logger.info('Broadcasted platform message via WebSocket', {
+        businessId: business.id,
+        platform,
+        threadId: msg.threadId
+      });
+    } catch (error) {
+      logger.logError(error, {
+        context: 'Failed to broadcast platform message via WebSocket',
+        businessId: business.id,
+        platform
+      });
+    }
+  }
+
+  // Broadcast bot reply to WebSocket clients
+  broadcastBotReply(business, originalMsg, reply, platform) {
+    try {
+      webChatSocketService.broadcastToBusinessClients(business.chatbotId, {
+        type: 'bot_reply',
+        data: {
+          businessId: business.id,
+          platform: platform,
+          threadId: originalMsg.threadId,
+          content: reply,
+          timestamp: new Date(),
+          isIncoming: false,
+          replyTo: originalMsg.messageId,
+          sender: 'Bot'
+        }
+      });
+
+      logger.info('Broadcasted bot reply via WebSocket', {
+        businessId: business.id,
+        platform,
+        threadId: originalMsg.threadId
+      });
+    } catch (error) {
+      logger.logError(error, {
+        context: 'Failed to broadcast bot reply via WebSocket',
+        businessId: business.id,
+        platform
       });
     }
   }

@@ -1,4 +1,5 @@
 import facebookService from "../services/facebookService.js";
+import { webChatSocketService } from "../services/webChatSocketService.js";
 import { logger } from "../utils/logger.js";
 
 // Assume `serializedCookies` would come from DB in real usage
@@ -12,7 +13,7 @@ export async function login(req, res) {
   }
 
   try {
-    const { api, serialized } = await facebookService.loginFacebook(
+    const { api: _api, serialized } = await facebookService.loginFacebook(
       email,
       password,
     );
@@ -59,6 +60,21 @@ export async function sendMessage(req, res) {
   try {
     const api = await facebookService.ensureClient(businessId, serialized);
     await facebookService.sendMessage(api, threadId, text);
+    
+    // Broadcast message via WebSocket
+    webChatSocketService.broadcastMessage({
+      type: 'manual_message_sent',
+      data: {
+        businessId,
+        platform: 'facebook',
+        threadId,
+        content: text,
+        timestamp: new Date(),
+        isIncoming: false,
+        sender: 'Manual'
+      }
+    });
+    
     res.json({ message: "Message sent" });
   } catch (err) {
     logger.error("Failed to send message", err);

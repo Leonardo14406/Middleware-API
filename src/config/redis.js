@@ -3,7 +3,7 @@ import Redis from "ioredis";
 import { logger } from "../utils/logger.js";
 
 let redis;
-const useRedis = process.env.USE_REDIS !== 'false'; // Default to true if not set
+const useRedis = process.env.USE_REDIS; // Default to true if not set
 
 // Helper to parse Redis URL if provided
 function getRedisConfig() {
