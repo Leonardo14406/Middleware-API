@@ -16,12 +16,14 @@ datasource db {
 
 
 model Business {
-  id         String    @id @default(cuid())
-  igUsername String    @unique
-  chatbotId  String
-  email      String
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id           String    @id @default(cuid())
+  businessName String
+  email        String    @unique
+  password     String
+  chatbotId    String
+  igUsername   String?   @unique
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   // Relations
   sessions   Session[]
@@ -65,4 +67,6 @@ model Message {
 enum Platform {
   INSTAGRAM
   FACEBOOK
+  WHATSAPP
+  WEBSITE
 }
