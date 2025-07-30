@@ -204,10 +204,86 @@ Example error response:
 }
 ```
 
+## WhatsApp Integration Endpoints
+
+### 1. WhatsApp Health Check
+**GET** `/whatsapp/health`
+
+Check if WhatsApp service is running and get available endpoints.
+
+**Response:**
+```json
+{
+  "success": true,
+  "service": "WhatsApp Service",
+  "status": "running",
+  "timestamp": "2025-07-30T12:00:00.000Z",
+  "endpoints": {
+    "webhook": "/whatsapp/webhook",
+    "bulkSend": "/whatsapp/send-bulk",
+    "appointmentReminder": "/whatsapp/send-reminder",
+    "test": "/whatsapp/test"
+  }
+}
+```
+
+### 2. Send WhatsApp Test Message
+**POST** `/whatsapp/test`
+
+Send a test message to a WhatsApp number.
+
+**Request Body:**
+```json
+{
+  "phoneNumber": "1234567890",
+  "message": "Hello from API!"
+}
+```
+
+### 3. Send Bulk WhatsApp Messages
+**POST** `/whatsapp/send-bulk`
+
+Send the same message to multiple WhatsApp numbers.
+
+**Request Body:**
+```json
+{
+  "phoneNumbers": ["1234567890", "0987654321"],
+  "message": "This is a bulk message!"
+}
+```
+
+### 4. Send Appointment Reminder
+**POST** `/whatsapp/send-reminder`
+
+Send a formatted appointment reminder via WhatsApp.
+
+**Request Body:**
+```json
+{
+  "phoneNumber": "1234567890",
+  "appointmentDetails": {
+    "date": "2025-07-30",
+    "time": "14:30",
+    "location": "Main Office",
+    "notes": "Bring ID"
+  }
+}
+```
+
+### 5. WhatsApp Webhook (Automatic)
+**GET/POST** `/whatsapp/webhook`
+
+- **GET**: Used by WhatsApp for webhook verification
+- **POST**: Receives incoming WhatsApp messages and processes them with AI
+
 ## Notes
 
 - All platform credentials are optional in the `addPlatformCredentials` endpoint
 - You can add credentials for only the platforms you need
-- WhatsApp and Website services are placeholder implementations ready for future development
+- WhatsApp integration is fully implemented with AI chatbot responses
+- Website services are placeholder implementations ready for future development
 - Platform removal supports multiple platforms in a single request
 - Business registration is now separate from platform authentication for better organization
+- WhatsApp messages are automatically processed and responded to via AI
+- For detailed WhatsApp setup, see `WHATSAPP_INTEGRATION.md`

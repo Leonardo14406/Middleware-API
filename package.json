@@ -5,7 +5,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon src/server.js",
+    "test-chatbot": "node test-chatbot.js",
+    "test-whatsapp": "node test-whatsapp.js",
+    "start-testing": "node start-testing.js"
   },
   "keywords": [],
   "author": "",
