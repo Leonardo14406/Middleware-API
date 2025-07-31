@@ -1,8 +1,8 @@
 import prisma from "../config/db.js";
 import { loginInstagram } from "../services/instagramService.js";
 import { loginWhatsApp } from "../services/whatsappService.js";
-import { setupWebsite } from "../services/websiteService.js";
 import { logger } from "../utils/logger.js";
+import jwt from "jsonwebtoken";
 
 // Register a business (only business info, no platform authentication)
 export async function registerBusiness(req, res) {
@@ -55,10 +55,9 @@ export async function addPlatformCredentials(req, res) {
     instagramUsername,
     instagramPassword,
     facebookPageAccessToken,
-    whatsappNumber,
-    whatsappApiKey,
-    websiteUrl,
-    websiteApiKey,
+    facebookVerifyToken,
+    whatsappBearerToken,
+    whatsappVerifyToken
   } = req.body;
 
   try {
@@ -74,8 +73,7 @@ export async function addPlatformCredentials(req, res) {
     const platformResults = {
       instagram: false,
       facebook: false,
-      whatsapp: false,
-      website: false,
+      whatsapp: false
     };
 
     // Instagram login and session save
@@ -107,20 +105,25 @@ export async function addPlatformCredentials(req, res) {
       }
     }
 
-    // Facebook Page Access Token setup
-    if (facebookPageAccessToken) {
+    // Facebook Page Access Token and Verification Token setup
+    if (facebookPageAccessToken && facebookVerifyToken) {
       try {
-        // No need to call loginFacebook or store session for Facebook anymore
-        // Just log and mark as configured
+        await prisma.business.update({
+          where: { id: businessId },
+          data: {
+            facebookPageAccessToken,
+            facebookVerifyToken
+          }
+        });
         platformResults.facebook = true;
-        logger.info("Facebook Page Access Token configured (env-based)", { businessId });
+        logger.info("Facebook Page Access Token and Verification Token configured from user input", { businessId });
       } catch (err) {
         logger.logError(err, { context: "Facebook setup failed", businessId });
       }
     }
 
     // WhatsApp setup
-    if (whatsappNumber && whatsappApiKey) {
+    if (whatsappBearerToken && whatsappVerifyToken) {
       try {
         const { serialized: whatsappSerialized } = await loginWhatsApp(
           whatsappNumber,
@@ -142,40 +145,17 @@ export async function addPlatformCredentials(req, res) {
             serializedCookies: whatsappSerialized,
           },
         });
+        await prisma.business.update({
+          where: { id: businessId },
+          data: {
+            whatsappBearerToken,
+            whatsappVerifyToken
+          }
+        });
         platformResults.whatsapp = true;
-        logger.info("WhatsApp credentials configured", { businessId, whatsappNumber });
+        logger.info("WhatsApp credentials and tokens configured", { businessId, whatsappNumber });
       } catch (err) {
         logger.logError(err, { context: "WhatsApp setup failed", businessId });
-      }
-    }
-
-    // Website setup
-    if (websiteUrl && websiteApiKey) {
-      try {
-        const { serialized: websiteSerialized } = await setupWebsite(
-          websiteUrl,
-          websiteApiKey,
-        );
-        await prisma.session.upsert({
-          where: {
-            businessId_platform: {
-              businessId,
-              platform: "WEBSITE",
-            },
-          },
-          update: {
-            serializedCookies: websiteSerialized,
-          },
-          create: {
-            businessId,
-            platform: "WEBSITE",
-            serializedCookies: websiteSerialized,
-          },
-        });
-        platformResults.website = true;
-        logger.info("Website credentials configured", { businessId, websiteUrl });
-      } catch (err) {
-        logger.logError(err, { context: "Website setup failed", businessId });
       }
     }
 
@@ -213,7 +193,6 @@ export async function getBusinessStatus(req, res) {
       instagram: sessions.some((s) => s.platform === "INSTAGRAM"),
       facebook: sessions.some((s) => s.platform === "FACEBOOK"),
       whatsapp: sessions.some((s) => s.platform === "WHATSAPP"),
-      website: sessions.some((s) => s.platform === "WEBSITE"),
     };
 
     res.status(200).json({
@@ -275,7 +254,7 @@ export async function removePlatformCredentials(req, res) {
       });
     }
 
-    const validPlatforms = ["INSTAGRAM", "FACEBOOK", "WHATSAPP", "WEBSITE"];
+    const validPlatforms = ["INSTAGRAM", "FACEBOOK", "WHATSAPP"];
     const invalidPlatforms = platforms.filter(p => !validPlatforms.includes(p.toUpperCase()));
     
     if (invalidPlatforms.length > 0) {
@@ -303,5 +282,38 @@ export async function removePlatformCredentials(req, res) {
   } catch (err) {
     logger.logError(err, { context: "removePlatformCredentials", businessId });
     res.status(500).json({ error: "Failed to remove platform credentials" });
+  }
+}
+
+// Login a business and return JWT token
+export async function loginBusiness(req, res) {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: "Email and password are required" });
+  }
+  try {
+    const business = await prisma.business.findUnique({ where: { email } });
+    if (!business || business.password !== password) {
+      return res.status(401).json({ error: "Invalid email or password" });
+    }
+    // Generate JWT token
+    const token = jwt.sign(
+      { businessId: business.id, email: business.email },
+      process.env.JWT_SECRET || "default_secret",
+      { expiresIn: "7d" }
+    );
+    res.status(200).json({
+      message: "Login successful",
+      token,
+      business: {
+        id: business.id,
+        businessName: business.businessName,
+        email: business.email,
+        chatbotId: business.chatbotId,
+      }
+    });
+  } catch (err) {
+    logger.logError(err, { context: "loginBusiness", email });
+    res.status(500).json({ error: "Failed to login" });
   }
 }

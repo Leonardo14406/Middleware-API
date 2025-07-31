@@ -1,18 +1,43 @@
 import { IgApiClient } from "instagram-private-api";
 import redis from "../config/redis.js";
 import { logger } from "../utils/logger.js";
+import { webChatSocketService } from "./webChatSocketService.js";
 
 async function cacheKey(businessId) {
   return `ig-client:${businessId}`;
 }
 
-async function loginInstagram(username, password) {
+async function loginInstagram(username, password, businessId) {
   const ig = new IgApiClient();
   ig.state.generateDevice(username);
 
   await ig.account.login(username, password);
   const serialized = await ig.state.serialize();
   delete serialized.constants;
+
+  // Save session to DB if businessId is provided
+  if (businessId) {
+    const { PrismaClient } = await import("@prisma/client");
+    const prisma = new PrismaClient();
+    await prisma.session.upsert({
+      where: {
+        businessId_platform: {
+          businessId,
+          platform: "INSTAGRAM"
+        }
+      },
+      update: {
+        serializedCookies: JSON.stringify(serialized),
+        updatedAt: new Date()
+      },
+      create: {
+        businessId,
+        platform: "INSTAGRAM",
+        serializedCookies: JSON.stringify(serialized)
+      }
+    });
+    logger.info("Instagram session saved for polling", { businessId });
+  }
 
   return {
     ig,
@@ -34,7 +59,7 @@ async function ensureClient(businessId, serializedCookies) {
     if (cachedSession) {
       try {
         return await restoreSession(cachedSession);
-      } catch (err) {
+      } catch {
         logger.warn("Invalid session in Redis, restoring from DB", { businessId });
         await redis.del(key); // Clear bad session
       }
@@ -87,7 +112,6 @@ async function fetchRecentMessages(ig, limit = 20) {
 async function sendMessage(ig, threadId, text) {
   const requestId = `ig_send_${Date.now()}`;
   const startTime = Date.now();
-  
   logger.info('Sending message to Instagram', {
     requestId,
     threadId,
@@ -104,14 +128,12 @@ async function sendMessage(ig, threadId, text) {
     });
 
     const result = await thread.broadcastText(text);
-    
     logger.info('Successfully sent message to Instagram', {
       requestId,
       threadId,
       result: result ? JSON.stringify(result) : 'No result',
       timeElapsed: `${Date.now() - startTime}ms`
     });
-    
     return result;
   } catch (error) {
     logger.error('Failed to send message to Instagram', {
@@ -125,22 +147,89 @@ async function sendMessage(ig, threadId, text) {
   }
 }
 
-// Export all functions as named exports
+// Process a single Instagram webhook event with AI and WebSocket
+export async function processInstagramEvent(webhookEvent) {
+  try {
+    const senderId = webhookEvent?.sender?.id;
+    const messageText = webhookEvent?.message?.text;
+    if (!senderId || !messageText) {
+      logger.info("Skipping Instagram event - missing sender or text", {
+        hasSender: !!senderId,
+        hasText: !!messageText
+      });
+      return;
+    }
+
+    // const businessId = req.business?.businessId;
+    // if (!businessId) {
+    //   logger.error("No businessId found in authenticated request");
+    //   return res.status(401).json({ error: "Unauthorized: businessId missing" });
+    // }
+    const businessId = process.env.BUSINESS_ID
+    const business = await checkBusinessExists(businessId);
+
+    webChatSocketService.broadcastToBusinessClients(business.chatbotId, {
+      type: 'instagram_message_received',
+      data: {
+        platform: 'instagram',
+        senderId,
+        userMessage: messageText,
+        timestamp: new Date()
+      }
+    });
+    const platformMessage = {
+      content: messageText,
+      threadId: senderId,
+      email: `instagram_${senderId}@business.com`,
+      timestamp: new Date()
+    };
+    const aiResponse = await webChatSocketService.forwardPlatformMessageToGenistudio(
+      chatbotId,
+      platformMessage,
+      'instagram'
+    );
+    logger.info("AI Response generated for Instagram", {
+      senderId: senderId ? senderId.substring(0, 10) + "..." : "unknown",
+      chatbotId,
+      responseLength: aiResponse ? aiResponse.length : 0
+    });
+    if (aiResponse) {
+      const { PrismaClient } = await import("@prisma/client");
+      const prisma = new PrismaClient();
+      const session = await prisma.session.findFirst({
+        where: { businessId, platform: "INSTAGRAM" }
+      });
+      if (session && session.serializedCookies) {
+        const ig = await restoreSession(session.serializedCookies);
+        await sendMessage(ig, senderId, aiResponse);
+      } else {
+        logger.warn("No Instagram session found for business, cannot send reply", { businessId });
+      }
+    }
+    return aiResponse;
+  } catch (error) {
+    logger.error("Error processing Instagram webhook event", {
+      error: error && error.message ? error.message : String(error)
+    });
+    return null;
+  }
+}
+
 export {
   loginInstagram,
   restoreSession,
   ensureClient,
   fetchRecentMessages,
-  sendMessage
+  sendMessage,
 };
 
-// Also provide a default export with all functions
 const instagramService = {
   loginInstagram,
   restoreSession,
   ensureClient,
   fetchRecentMessages,
-  sendMessage
+  sendMessage,
+  processInstagramEvent
 };
 
 export default instagramService;

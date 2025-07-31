@@ -28,13 +28,6 @@ class WebChatSocketService {
       this.clients.set(clientId, clientInfo);
       logger.info('WebSocket client connected', { clientId, totalClients: this.clients.size });
 
-      // // Send welcome message
-      // this.sendMessage(ws, {
-      //   type: 'connection',
-      //   status: 'connected',
-      //   clientId: clientId
-      // });
-
       // Handle incoming messages
       ws.on('message', async (data) => {
         try {

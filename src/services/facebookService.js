@@ -113,8 +113,13 @@ export async function handleFacebookMessage(req, res) {
             messageText: messageText ? messageText.substring(0, 100) + (messageText.length > 100 ? '...' : '') : ""
           });
 
-          // Get business from environment (can be extended for multi-business)
-          const businessId = process.env.BUSINESS_ID || "default-business-id";
+          // Get businessId from authenticated request (set by auth middleware)
+          // const businessId = req.business?.businessId;
+          // if (!businessId) {
+          //   logger.error("No businessId found in authenticated request");
+          //   return res.status(401).json({ error: "Unauthorized: businessId missing" });
+          // }
+          const businessId = process.env.BUSINESS_ID
           const business = await checkBusinessExists(businessId);
 
           // Process message with AI
@@ -232,8 +237,12 @@ export async function processWebhookEvent(webhookEvent) {
       return;
     }
 
-    // Get business from environment (can be extended for multi-business)
-    const businessId = process.env.BUSINESS_ID || "default-business-id";
+    // const businessId = req.business?.businessId;
+    // if (!businessId) {
+    //   logger.error("No businessId found in authenticated request");
+    //   return res.status(401).json({ error: "Unauthorized: businessId missing" });
+    // }
+    const businessId = process.env.BUSINESS_ID
     const business = await checkBusinessExists(businessId);
 
     // Process message with AI

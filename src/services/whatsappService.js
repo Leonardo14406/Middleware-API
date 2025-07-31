@@ -89,10 +89,12 @@ async function processMessage(phoneNumber, messageText) {
   try {
     logger.info("Processing WhatsApp message", { phoneNumber, messageText });
 
-    // Get business ID from environment
-    const businessId = process.env.BUSINESS_ID || "default-business-id";
-    
-    // Check if business exists (don't create automatically)
+    // const businessId = req.business?.businessId;
+    // if (!businessId) {
+    //   logger.error("No businessId found in authenticated request");
+    //   return res.status(401).json({ error: "Unauthorized: businessId missing" });
+    // }
+    const businessId = process.env.BUSINESS_ID
     const business = await checkBusinessExists(businessId);
 
     // Process with AI and get response immediately

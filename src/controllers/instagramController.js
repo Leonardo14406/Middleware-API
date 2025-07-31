@@ -5,6 +5,7 @@ import {
   ensureClient,
   fetchRecentMessages,
   sendMessage,
+  loginInstagram,
 } from "../services/instagramService.js";
 
 // Get recent Instagram DMs for a business
@@ -67,5 +68,20 @@ export async function replyToThread(req, res) {
   } catch (err) {
     logger.logError(err, { context: 'replyToThread', businessId, threadId });
     res.status(500).json({ error: "Failed to send message" });
+  }
+}
+
+// Login to Instagram and save session
+export async function loginInstagramHandler(req, res) {
+  const { username, password, businessId } = req.body;
+  if (!username || !password || !businessId) {
+    return res.status(400).json({ error: "username, password, and businessId are required" });
+  }
+  try {
+    await loginInstagram(username, password, businessId);
+    res.status(200).json({ message: "Instagram login successful and session saved" });
+  } catch (err) {
+    logger.logError(err, { context: "loginInstagramHandler", businessId });
+    res.status(500).json({ error: "Instagram login failed", details: err.message });
   }
 }
