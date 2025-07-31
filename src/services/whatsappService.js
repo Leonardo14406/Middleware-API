@@ -138,7 +138,7 @@ async function processMessage(phoneNumber, messageText) {
   }
 }
 
-// Handle incoming WhatsApp messages with improved processing
+// Handle incoming WhatsApp messages
 export async function handleWhatsAppMessage(req, res) {
   try {
     logger.info("WhatsApp webhook received", { 
@@ -169,14 +169,14 @@ export async function handleWhatsAppMessage(req, res) {
 
         // Skip messages sent by us (outgoing messages)
         if (message.from_me) {
-          logger.info("⬆️ OUTGOING MESSAGE - Skipping (this is a message YOU sent)", { 
+          logger.info("Skipping outgoing message", { 
             messageId: message.id,
             text: message.text?.body || message.body 
           });
           continue;
         }
         
-        logger.info("⬇️ INCOMING MESSAGE - Processing (this is a message someone sent TO you)", {
+        logger.info("Processing incoming message", {
           messageId: message.id,
           from: message.from,
           chatId: message.chat_id,
@@ -192,7 +192,7 @@ export async function handleWhatsAppMessage(req, res) {
           continue;
         }
         
-        logger.info("🤖 CHATBOT PROCESSING - Generating response for incoming message", {
+        logger.info("Generating chatbot response", {
           phoneNumber,
           messageText: messageText.substring(0, 100) + (messageText.length > 100 ? '...' : ''),
           messageId: message.id
@@ -204,12 +204,12 @@ export async function handleWhatsAppMessage(req, res) {
         
         if (result.success) {
           processedCount++;
-          logger.info("✅ RESPONSE SENT - Chatbot replied successfully", {
+          logger.info("Chatbot response sent successfully", {
             phoneNumber,
             responseLength: result.response?.length
           });
         } else {
-          logger.error("❌ RESPONSE FAILED - Chatbot could not reply", {
+          logger.error("Chatbot response failed", {
             phoneNumber,
             error: result.error
           });
@@ -260,7 +260,7 @@ export async function handleWhatsAppMessage(req, res) {
   }
 }
 
-// Send WhatsApp message via API with improved error handling and delivery tracking
+// Send WhatsApp message via API
 export async function sendWhatsAppMessage(phoneNumber, messageText, typingTime = 2) {
   try {
     const formattedNumber = formatWhatsAppNumber(phoneNumber);
@@ -320,8 +320,7 @@ export async function sendWhatsAppMessage(phoneNumber, messageText, typingTime =
     logger.info('WhatsApp message sent successfully', { 
       phoneNumber: formattedNumber, 
       messageId: data.id,
-      status: data.status || 'sent',
-      sent: data.sent || true
+      status: data.status || 'sent'
     });
     
     return data;

@@ -1,6 +1,5 @@
 import prisma from "../config/db.js";
 import { loginInstagram } from "../services/instagramService.js";
-import { loginFacebook } from "../services/facebookService.js";
 import { loginWhatsApp } from "../services/whatsappService.js";
 import { setupWebsite } from "../services/websiteService.js";
 import { logger } from "../utils/logger.js";
@@ -55,8 +54,7 @@ export async function addPlatformCredentials(req, res) {
   const {
     instagramUsername,
     instagramPassword,
-    facebookEmail,
-    facebookPassword,
+    facebookPageAccessToken,
     whatsappNumber,
     whatsappApiKey,
     websiteUrl,
@@ -109,32 +107,15 @@ export async function addPlatformCredentials(req, res) {
       }
     }
 
-    // Facebook login and session save
-    if (facebookEmail && facebookPassword) {
+    // Facebook Page Access Token setup
+    if (facebookPageAccessToken) {
       try {
-        const { serialized: fbSerialized } = await loginFacebook(
-          facebookEmail,
-          facebookPassword,
-        );
-        await prisma.session.upsert({
-          where: {
-            businessId_platform: {
-              businessId,
-              platform: "FACEBOOK",
-            },
-          },
-          update: {
-            serializedCookies: fbSerialized,
-          },
-          create: {
-            businessId,
-            platform: "FACEBOOK",
-            serializedCookies: fbSerialized,
-          },
-        });
+        // No need to call loginFacebook or store session for Facebook anymore
+        // Just log and mark as configured
         platformResults.facebook = true;
+        logger.info("Facebook Page Access Token configured (env-based)", { businessId });
       } catch (err) {
-        logger.logError(err, { context: "Facebook login failed", businessId });
+        logger.logError(err, { context: "Facebook setup failed", businessId });
       }
     }
 

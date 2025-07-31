@@ -1,9 +1,9 @@
 import express from "express";
-import { getMessages, sendMessage } from "../controllers/facebookController.js";
+import { verifyWebhook, receiveMessage } from "../controllers/facebookController.js";
 
 const router = express.Router();
 
-router.get("/:businessId/messages", getMessages);
-router.post("/:businessId/messages", sendMessage);
+// Webhook verification and message handling
+router.route("/webhook").get(verifyWebhook).post(receiveMessage);
 
 export default router;
