@@ -85,8 +85,44 @@ async function fetchRecentMessages(ig, limit = 20) {
 }
 
 async function sendMessage(ig, threadId, text) {
-  const thread = ig.entity.directThread(threadId);
-  await thread.broadcastText(text);
+  const requestId = `ig_send_${Date.now()}`;
+  const startTime = Date.now();
+  
+  logger.info('Sending message to Instagram', {
+    requestId,
+    threadId,
+    textLength: text.length,
+    textPreview: text.substring(0, 100) + (text.length > 100 ? '...' : '')
+  });
+
+  try {
+    const thread = ig.entity.directThread(threadId);
+    logger.debug('Created thread instance', {
+      requestId,
+      threadId,
+      threadType: thread.constructor?.name
+    });
+
+    const result = await thread.broadcastText(text);
+    
+    logger.info('Successfully sent message to Instagram', {
+      requestId,
+      threadId,
+      result: result ? JSON.stringify(result) : 'No result',
+      timeElapsed: `${Date.now() - startTime}ms`
+    });
+    
+    return result;
+  } catch (error) {
+    logger.error('Failed to send message to Instagram', {
+      requestId,
+      threadId,
+      error: error.message,
+      stack: error.stack,
+      timeElapsed: `${Date.now() - startTime}ms`
+    });
+    throw error;
+  }
 }
 
 // Export all functions as named exports

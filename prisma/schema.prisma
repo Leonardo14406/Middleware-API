@@ -39,6 +39,7 @@ model Session {
   serializedCookies String    @db.Text
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
+  expiresAt         DateTime?  @default(dbgenerated("now() + interval '30 days'"))
 
   // Relations
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
