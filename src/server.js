@@ -13,6 +13,10 @@ import whatsappRoutes from "./routes/whatsappRoute.js";
 import { pollingService } from "./services/pollingService.js";
 import { webChatSocketService } from "./services/webChatSocketService.js";
 import { logger } from "./utils/logger.js";
+import prisma from "./config/db.js";
+import { initQueue, startQueueWorker } from "./services/queueService.js";
+
+
 
 // ES module __dirname equivalent
 const __filename = fileURLToPath(import.meta.url);
@@ -74,9 +78,11 @@ server.listen(PORT, async () => {
   logger.info(`Chatbot Testing Interface available at http://localhost:${PORT}`);
 
   try {
+    await initQueue();
+    await startQueueWorker();
     await pollingService.startAllPolling();
-    logger.info("Polling service started");
+    logger.info("Queue and polling services started");
   } catch (err) {
-    logger.logError(err, { context: "Failed to start polling service" });
+    logger.logError(err, { context: "Failed to start queue and polling services" });
   }
 });

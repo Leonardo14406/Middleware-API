@@ -1,14 +1,13 @@
-import instagramService from "./instagramService.js";
-import facebookService from "./facebookService.js";
-import { webChatSocketService } from "./webChatSocketService.js";
-import { chatbotService } from "./chatbotService.js";
-import { logger } from "../utils/logger.js";
-import prisma from "../config/db.js";
+import { IgApiClient } from 'instagram-private-api';
+import prisma from '../config/db.js';
+import { logger } from '../utils/logger.js';
+import { enqueueMessage } from './queueService.js';
+import { webChatSocketService } from './webChatSocketService.js';
 
 class PollingService {
   constructor() {
     this.pollers = new Map();
-    this.pollInterval = 30000; // 30 seconds
+    this.basePollInterval = 30000; // 30 seconds base
   }
 
   async startPolling(businessId) {
@@ -18,37 +17,41 @@ class PollingService {
     }
 
     const poll = async () => {
+      const pollId = `poll_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+      const startTime = Date.now();
+
       try {
-        logger.debug(`Polling for business: ${businessId}`);
+        logger.debug(`Polling for business: ${businessId}`, { pollId });
         const business = await prisma.business.findUnique({
           where: { id: businessId },
+          include: { sessions: { where: { platform: 'INSTAGRAM', expiresAt: { gt: new Date() } } } },
         });
 
-        if (!business) {
-          logger.warn(`Business not found: ${businessId}`);
+        if (!business || !business.sessions[0]) {
+          logger.warn(`No business or active Instagram session found: ${businessId}`, { pollId });
           this.stopPolling(businessId);
           return;
         }
 
-        if (business.instagramSession) {
-          await this.pollInstagram(business);
-        }
-
-        if (business.facebookPageId && business.facebookAccessToken) {
-          await this.pollFacebook(business);
-        }
+        await this.pollInstagram(business, pollId);
+        await prisma.business.update({
+          where: { id: businessId },
+          data: { lastPolledAt: new Date() },
+        });
       } catch (error) {
-        logger.error(`Polling error for business ${businessId}:`, error);
+        logger.logError(error, { context: 'pollMessages', pollId, businessId });
       }
+
+      logger.info(`Completed poll for business: ${businessId}`, {
+        pollId,
+        timeElapsed: `${Date.now() - startTime}ms`,
+      });
     };
 
-    // Start polling
-    this.pollers.set(businessId, setInterval(poll, this.pollInterval));
-    
-    // Initial poll
+    const interval = this.basePollInterval + Math.random() * 15000;
+    this.pollers.set(businessId, setInterval(poll, interval));
     await poll();
-    
-    logger.info(`Started polling for business: ${businessId}`);
+    logger.info(`Started polling for business: ${businessId}`, { interval });
   }
 
   async stopPolling(businessId) {
@@ -60,443 +63,153 @@ class PollingService {
     }
   }
 
-  async pollInstagram(business) {
-    const pollId = `poll_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-    const startTime = Date.now();
-    
-    logger.info(`Starting Instagram poll for business`, {
+  async pollInstagram(business, pollId) {
+    const session = business.sessions[0];
+    logger.debug('Found active Instagram session', {
       pollId,
       businessId: business.id,
-      businessName: business.name,
-      hasChatbotId: !!business.chatbotId,
-      timestamp: new Date().toISOString()
+      sessionId: session.id,
+      expiresAt: session.expiresAt,
     });
 
+    const ig = new IgApiClient();
+    ig.state.generateDevice(`${business.igUsername}-${Math.random().toString(36).substring(2)}`);
+
     try {
-      // Get the latest active Instagram session for this business
-      const session = await prisma.session.findFirst({
-        where: {
-          businessId: business.id,
-          platform: 'INSTAGRAM',
-          expiresAt: { gt: new Date() },
-          serializedCookies: { not: null }
-        },
-        orderBy: { expiresAt: 'desc' },
-        take: 1
-      });
+      await withRetry(() => ig.state.deserialize(session.serializedCookies));
+      const direct = ig.feed.directInbox();
+      const threads = await direct.items();
 
-      if (!session) {
-        logger.warn('No active Instagram session found for business', {
-          pollId,
-          businessId: business.id,
-          businessName: business.name
-        });
-        return;
-      }
-
-      logger.debug('Found active Instagram session', {
-        pollId,
-        businessId: business.id,
-        sessionId: session.id,
-        expiresAt: session.expiresAt,
-        hasSerializedCookies: !!session.serializedCookies
-      });
-
-      let client;
-      try {
-        client = await instagramService.ensureClient(
-          business.id,
-          session.serializedCookies
-        );
-        logger.debug('Successfully initialized Instagram client', {
-          pollId,
-          businessId: business.id
-        });
-      } catch (clientError) {
-        logger.error('Failed to initialize Instagram client', {
-          pollId,
-          businessId: business.id,
-          error: clientError.message,
-          stack: clientError.stack
-        });
-        throw clientError;
-      }
-
-      let messages = [];
-      try {
-        messages = await instagramService.fetchRecentMessages(client, 10);
-        logger.debug(`Fetched ${messages.length} messages from Instagram`, {
-          pollId,
-          businessId: business.id,
-          messageCount: messages.length,
-          messageIds: messages.map(m => m.messageId),
-          timeElapsed: `${Date.now() - startTime}ms`
-        });
-      } catch (fetchError) {
-        logger.error('Failed to fetch messages from Instagram', {
-          pollId,
-          businessId: business.id,
-          error: fetchError.message,
-          stack: fetchError.stack
-        });
-        throw fetchError;
-      }
-
-      // Process each message
       let processedCount = 0;
-      for (const msg of messages) {
-        try {
-          await this.processMessage(business, msg, 'instagram');
-          processedCount++;
-        } catch (processError) {
-          logger.error('Error processing Instagram message', {
-            pollId,
+      for (const thread of threads.slice(0, 5)) {
+        const lastMessage = thread.items[0];
+        if (!lastMessage || lastMessage.item_type !== 'text' || lastMessage.user_id === ig.state.cookieUserId) continue;
+
+        const lastProcessed = await prisma.message.findFirst({
+          where: { threadId: thread.thread_id, businessId: business.id },
+          orderBy: { timestamp: 'desc' },
+        });
+
+        if (lastProcessed && lastProcessed.messageId === lastMessage.item_id) continue;
+
+        await enqueueMessage({
+          businessId: business.id,
+          threadId: thread.thread_id,
+          messageText: lastMessage.text,
+          userId: thread.users[0].pk,
+          messageId: lastMessage.item_id,
+          timestamp: new Date(lastMessage.timestamp / 1000).getTime(),
+          chatbotId: business.chatbotId,
+          platform: 'INSTAGRAM',
+        });
+
+        await prisma.message.create({
+          data: {
             businessId: business.id,
-            messageId: msg.messageId,
-            threadId: msg.threadId,
-            error: processError.message,
-            stack: processError.stack
-          });
-        }
+            threadId: thread.thread_id,
+            messageId: lastMessage.item_id,
+            content: lastMessage.text,
+            isIncoming: true,
+            timestamp: new Date(lastMessage.timestamp / 1000),
+            createdAt: new Date(),
+          },
+        });
+
+        this.broadcastNewMessage(business, {
+          threadId: thread.thread_id,
+          messageId: lastMessage.item_id,
+          content: lastMessage.text,
+          timestamp: new Date(lastMessage.timestamp / 1000).toISOString(),
+          senderId: thread.users[0].pk,
+          isIncoming: true,
+        }, 'INSTAGRAM', pollId);
+
+        processedCount++;
       }
 
       logger.info('Completed Instagram poll', {
         pollId,
         businessId: business.id,
-        businessName: business.name,
-        messagesFetched: messages.length,
+        businessName: business.businessName,
         messagesProcessed: processedCount,
-        timeElapsed: `${Date.now() - startTime}ms`
       });
     } catch (error) {
-      logger.error('Instagram polling failed', {
-        pollId,
-        businessId: business.id,
-        error: error.message,
-        stack: error.stack,
-        timeElapsed: `${Date.now() - startTime}ms`
-      });
+      if (error.message.includes('login_required')) {
+        logger.warn('Instagram session invalid or account may be banned', { pollId, businessId: business.id });
+        await prisma.session.deleteMany({ where: { businessId: business.id, platform: 'INSTAGRAM' } });
+        await prisma.business.update({ where: { id: business.id }, data: { igUsername: null } });
+      }
       throw error;
     }
   }
 
-  async pollFacebook(business) {
-    // Similar implementation to pollInstagram but for Facebook
-    // Implementation omitted for brevity
-  }
-
-  async processMessage(business, msg, platform) {
-    const processId = `proc_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-    const startTime = Date.now();
-
-    logger.info('Processing incoming message', {
-      processId,
-      businessId: business.id,
-      platform,
-      threadId: msg.threadId,
-      messageId: msg.messageId,
-      isIncoming: msg.isIncoming,
-      content: msg.content?.substring(0, 200) + (msg.content?.length > 200 ? '...' : ''),
-      timestamp: new Date().toISOString()
-    });
-
-    // Skip processing if this is an outgoing message from us
-    if (msg.isIncoming === false) {
-      logger.debug('Skipping outgoing message', {
-        processId,
-        businessId: business.id,
-        platform,
-        threadId: msg.threadId,
-        messageId: msg.messageId
-      });
-      return;
-    }
-
-    try {
-      // Broadcast the incoming message
-      this.broadcastNewMessage(business, msg, platform);
-      
-      logger.debug('Broadcasted incoming message', {
-        processId,
-        businessId: business.id,
-        platform,
-        threadId: msg.threadId
-      });
-
-      // Check if business has a chatbot configured
-      if (!business.chatbotId) {
-        logger.warn('No chatbot configured for business', {
-          processId,
-          businessId: business.id,
-          platform
-        });
-        return;
-      }
-
-      // Prepare context for the chatbot
-      const context = {
-        threadId: msg.threadId,
-        platform: platform,
-        businessId: business.id,
-        email: business.email || process.env.GUEST_EMAIL || 'guest@example.com',
-        timestamp: msg.timestamp || new Date().toISOString(),
-        // Add additional context that might be useful for the chatbot
-        userInfo: {
-          platformUserId: msg.senderId || 'unknown',
-          threadId: msg.threadId
-        }
-      };
-      
-      // Log the context being sent to the chatbot
-      logger.debug('Prepared chatbot context', {
-        processId,
-        businessId: business.id,
-        threadId: msg.threadId,
-        hasEmail: !!context.email,
-        platform: platform
-      });
-
-      logger.debug('Sending message to ChatbotService', {
-        processId,
-        businessId: business.id,
-        chatbotId: business.chatbotId,
-        platform,
-        threadId: msg.threadId,
-        context
-      });
-
-      // Send message to Genistudio via ChatbotService
-      let reply;
-      try {
-        reply = await chatbotService.sendMessage(
-          business.chatbotId,
-          msg.content,
-          context
-        );
-        
-        logger.debug('Successfully sent message to ChatbotService', {
-          processId,
-          businessId: business.id,
-          platform,
-          threadId: msg.threadId,
-          hasReply: !!reply
-        });
-      } catch (chatbotError) {
-        logger.error('Error sending message to ChatbotService', {
-          processId,
-          businessId: business.id,
-          platform,
-          threadId: msg.threadId,
-          error: chatbotError.message,
-          stack: chatbotError.stack
-        });
-        throw chatbotError;
-      }
-
-      if (reply) {
-        logger.info('Received reply from Genistudio', {
-          processId,
-          businessId: business.id,
-          platform,
-          threadId: msg.threadId,
-          replyLength: reply.length,
-          replyPreview: reply.substring(0, 200) + (reply.length > 200 ? '...' : ''),
-          timeElapsed: `${Date.now() - startTime}ms`
-        });
-
-        // Send the reply back to the platform
-        if (platform === "instagram") {
-          logger.debug('Preparing to send reply to Instagram', {
-            processId,
-            businessId: business.id,
-            threadId: msg.threadId,
-            replyLength: reply.length
-          });
-          
-          // Get the latest active Instagram session for this business
-          const session = await prisma.session.findFirst({
-            where: {
-              businessId: business.id,
-              platform: 'INSTAGRAM',
-              expiresAt: { gt: new Date() },
-              serializedCookies: { not: null }
-            },
-            orderBy: { expiresAt: 'desc' },
-            take: 1
-          });
-
-          if (!session) {
-            logger.error('No active Instagram session found when trying to send reply', {
-              processId,
-              businessId: business.id,
-              threadId: msg.threadId
-            });
-            throw new Error('No active Instagram session found');
-          }
-          
-          const client = await instagramService.ensureClient(
-            business.id,
-            session.accessToken
-          );
-          
-          await instagramService.sendMessage(
-            client,
-            msg.threadId,
-            reply
-          );
-          
-          logger.info('Sent reply to Instagram', {
-            processId,
-            businessId: business.id,
-            threadId: msg.threadId,
-            replyLength: reply.length
-          });
-        }
-
-        // Broadcast the bot's reply
-        this.broadcastBotReply(business, msg, reply, platform);
-      }
-    } catch (error) {
-      logger.error('Error processing message', {
-        processId,
-        businessId: business.id,
-        platform,
-        threadId: msg.threadId,
-        error: error.message,
-        stack: error.stack,
-        timeElapsed: `${Date.now() - startTime}ms`
-      });
-      
-      // Re-throw to allow the caller to handle the error if needed
-      throw error;
-    } finally {
-      logger.debug('Completed message processing', {
-        processId,
-        businessId: business.id,
-        platform,
-        threadId: msg.threadId,
-        timeElapsed: `${Date.now() - startTime}ms`
-      });
-    }
-  }
-
-  broadcastNewMessage(business, msg, platform) {
+  broadcastNewMessage(business, msg, platform, pollId) {
     try {
       webChatSocketService.broadcastToBusinessClients(business.chatbotId, {
         type: 'platform_message',
         data: {
           businessId: business.id,
-          platform: platform,
+          platform,
           threadId: msg.threadId,
           messageId: msg.messageId,
           content: msg.content,
           timestamp: msg.timestamp,
           isIncoming: true,
-          sender: platform === 'instagram' ? 'Instagram User' : 'Facebook User'
-        }
+          sender: 'Instagram User',
+        },
       });
-
-      logger.info('Broadcasted platform message via WebSocket', {
-        businessId: business.id,
-        platform,
-        threadId: msg.threadId,
-        messageId: msg.messageId
-      });
+      logger.info('Broadcasted platform message via WebSocket', { pollId, businessId: business.id, platform, threadId: msg.threadId });
     } catch (error) {
-      logger.error('Error broadcasting new message', {
-        businessId: business.id,
-        platform,
-        threadId: msg.threadId,
-        error: error.message,
-        stack: error.stack
-      });
+      logger.logError(error, { context: 'broadcastNewMessage', pollId, businessId: business.id, platform, threadId: msg.threadId });
     }
   }
 
-  broadcastBotReply(business, originalMsg, reply, platform) {
+  broadcastBotReply(business, originalMsg, reply, platform, processId) {
     try {
       webChatSocketService.broadcastToBusinessClients(business.chatbotId, {
         type: 'bot_reply',
         data: {
           businessId: business.id,
-          platform: platform,
+          platform,
           threadId: originalMsg.threadId,
           messageId: `bot_${Date.now()}`,
           content: reply,
           timestamp: new Date().toISOString(),
           isIncoming: false,
           sender: 'Bot',
-          inReplyTo: originalMsg.messageId
-        }
+          inReplyTo: originalMsg.messageId,
+        },
       });
-
-      logger.info('Broadcasted bot reply via WebSocket', {
-        businessId: business.id,
-        platform,
-        threadId: originalMsg.threadId,
-        replyLength: reply.length
-      });
+      logger.info('Broadcasted bot reply via WebSocket', { processId, businessId: business.id, platform, threadId: originalMsg.threadId });
     } catch (error) {
-      logger.error('Error broadcasting bot reply', {
-        businessId: business.id,
-        platform,
-        threadId: originalMsg.threadId,
-        error: error.message,
-        stack: error.stack
-      });
+      logger.logError(error, { context: 'broadcastBotReply', processId, businessId: business.id, platform, threadId: originalMsg.threadId });
     }
   }
 
   async startAllPolling() {
     try {
-      // Step 1: Find all active Instagram sessions
-      const activeInstagramSessions = await prisma.session.findMany({
-        where: {
-          platform: 'INSTAGRAM',
-          expiresAt: { gt: new Date() },
-          serializedCookies: { not: "" }
-        },
-        select: {
-          businessId: true
-        },
-        distinct: ['businessId'] // Only get one session per business
+      const activeSessions = await prisma.session.findMany({
+        where: { platform: 'INSTAGRAM', expiresAt: { gt: new Date() }, serializedCookies: { not: '' } },
+        select: { businessId: true },
+        distinct: ['businessId'],
       });
 
-      // If no active sessions, log and return early
-      if (activeInstagramSessions.length === 0) {
+      if (activeSessions.length === 0) {
         logger.info('No active Instagram sessions found for polling');
         return;
       }
 
-      // Get unique business IDs with active Instagram sessions
-      const instagramBusinessIds = activeInstagramSessions.map(s => s.businessId);
-
-      // Find businesses with active Instagram sessions
       const businesses = await prisma.business.findMany({
-        where: {
-          id: { in: instagramBusinessIds }
-        }
+        where: { id: { in: activeSessions.map(s => s.businessId) } },
       });
 
-      // Start polling for each business with active sessions
       for (const biz of businesses) {
-        const hasInstagramSession = biz.sessions && biz.sessions.length > 0;
-        
-        if (hasInstagramSession) {
-          logger.info(`Starting polling for business ${biz.id}`, {
-            hasInstagramSession,
-            businessId: biz.id
-          });
-          await this.startPolling(biz.id);
-        }
+        await this.startPolling(biz.id);
       }
-      
+
       logger.info(`Started polling for ${businesses.length} businesses`);
     } catch (error) {
-      logger.error('Error in startAllPolling:', {
-        error: error.message,
-        stack: error.stack
-      });
+      logger.logError(error, { context: 'startAllPolling' });
       throw error;
     }
   }
@@ -508,7 +221,19 @@ class PollingService {
   }
 }
 
-// Create and export a single instance of PollingService
-const pollingService = new PollingService();
+export async function withRetry(fn, maxRetries = 3, delay = 1000) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err.message.includes('rate limit')) {
+        await new Promise(resolve => setTimeout(resolve, 60000));
+      }
+      if (i === maxRetries - 1) throw err;
+      await new Promise(resolve => setTimeout(resolve, delay * 2 ** i));
+    }
+  }
+}
 
+const pollingService = new PollingService();
 export { pollingService };
