@@ -39,8 +39,14 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static files from public directory
-app.use(express.static(path.join(__dirname, '../public')));
+// Health check endpoint
+app.get('/', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    message: 'Middleware API is running',
+    timestamp: new Date().toISOString()
+  });
+});
 
 // Routes
 app.use("/business", businessRoutes);
@@ -48,11 +54,6 @@ app.use("/instagram", instagramRoutes);
 app.use("/facebook", facebookRoutes);
 app.use("/api/webchat", webSocketRoutes);
 app.use("/whatsapp", whatsappRoutes);
-
-// Serve chatbot testing interface at root
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/index.html'));
-});
 
 // Global error handler
 app.use((err, req, res, _next) => {
