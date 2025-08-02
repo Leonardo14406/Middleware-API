@@ -14,11 +14,11 @@ const router = express.Router();
 // Business management routes
 router.post("/register", registerBusiness);
 router.post("/login", loginBusiness);
-router.get("/status/:businessId", authenticateJWT, getBusinessStatus);
-router.put("/business/:businessId", authenticateJWT, updateBusiness);
+router.get("/status/:businessId", getBusinessStatus);
+router.put("/:businessId", updateBusiness);
 
 // Platform credentials management routes
-router.post("/platforms/:businessId", authenticateJWT, addPlatformCredentials);
-router.delete("/platforms/:businessId", authenticateJWT, removePlatformCredentials);
+router.post("/platforms/:businessId", addPlatformCredentials);
+router.delete("/platforms/:businessId", removePlatformCredentials);
 
 export default router;

@@ -57,7 +57,9 @@ export async function addPlatformCredentials(req, res) {
     facebookPageAccessToken,
     facebookVerifyToken,
     whatsappBearerToken,
-    whatsappVerifyToken
+    whatsappVerifyToken,
+    recipientId,
+    channelId
   } = req.body;
 
   try {
@@ -69,12 +71,6 @@ export async function addPlatformCredentials(req, res) {
     if (!business) {
       return res.status(404).json({ error: "Business not found" });
     }
-
-    const platformResults = {
-      instagram: false,
-      facebook: false,
-      whatsapp: false
-    };
 
     // Instagram login and session save
     if (instagramUsername && instagramPassword) {
@@ -99,7 +95,6 @@ export async function addPlatformCredentials(req, res) {
             serializedCookies: igSerialized,
           },
         });
-        platformResults.instagram = true;
       } catch (err) {
         logger.logError(err, { context: "Instagram login failed", businessId });
       }
@@ -112,10 +107,10 @@ export async function addPlatformCredentials(req, res) {
           where: { id: businessId },
           data: {
             facebookPageAccessToken,
-            facebookVerifyToken
+            facebookVerifyToken,
+            recipientId
           }
         });
-        platformResults.facebook = true;
         logger.info("Facebook Page Access Token and Verification Token configured from user input", { businessId });
       } catch (err) {
         logger.logError(err, { context: "Facebook setup failed", businessId });
@@ -126,8 +121,8 @@ export async function addPlatformCredentials(req, res) {
     if (whatsappBearerToken && whatsappVerifyToken) {
       try {
         const { serialized: whatsappSerialized } = await loginWhatsApp(
-          whatsappNumber,
-          whatsappApiKey,
+          whatsappBearerToken,
+          whatsappVerifyToken,
         );
         await prisma.session.upsert({
           where: {
@@ -149,18 +144,25 @@ export async function addPlatformCredentials(req, res) {
           where: { id: businessId },
           data: {
             whatsappBearerToken,
-            whatsappVerifyToken
+            whatsappVerifyToken,
+            channelId
           }
         });
-        platformResults.whatsapp = true;
-        logger.info("WhatsApp credentials and tokens configured", { businessId, whatsappNumber });
+        logger.info("WhatsApp credentials and tokens configured", { businessId });
       } catch (err) {
         logger.logError(err, { context: "WhatsApp setup failed", businessId });
       }
     }
 
+    // After all updates, fetch the business and sessions to get actual platform status
+    const updatedBusiness = await prisma.business.findUnique({ where: { id: businessId } });
+    const sessions = await prisma.session.findMany({ where: { businessId } });
+    const platformResults = {
+      instagram: !!(updatedBusiness.igUsername && sessions.some(s => s.platform === "INSTAGRAM")),
+      facebook: !!(updatedBusiness.facebookPageAccessToken && updatedBusiness.facebookVerifyToken),
+      whatsapp: !!(updatedBusiness.whatsappBearerToken && updatedBusiness.whatsappVerifyToken && sessions.some(s => s.platform === "WHATSAPP")),
+    };
     const successCount = Object.values(platformResults).filter(Boolean).length;
-    
     res.status(200).json({
       message: `Platform credentials processed. ${successCount} platforms configured successfully.`,
       platforms: platformResults,

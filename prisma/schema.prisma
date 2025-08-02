@@ -25,6 +25,15 @@ model Business {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
+  facebookPageAccessToken String?
+  facebookVerifyToken     String?
+  whatsappBearerToken     String?
+  whatsappVerifyToken     String?
+  instagramAccessToken    String?
+
+  recipientId String? @unique // For Facebook Messenger recipient ID
+  channelId String? @unique // For WhatsApp channel ID
+
   // Relations
   sessions   Session[]
   messages   Message[]

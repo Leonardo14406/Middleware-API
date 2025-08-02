@@ -1,5 +1,4 @@
 import instagramService from "./instagramService.js";
-import facebookService from "./facebookService.js";
 import { webChatSocketService } from "./webChatSocketService.js";
 import { chatbotService } from "./chatbotService.js";
 import { logger } from "../utils/logger.js";
