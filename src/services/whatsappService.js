@@ -210,8 +210,40 @@ export async function handleWhatsAppMessage(req, res) {
 
         console.log("mes!!", message)
 
-        const business = await Promise.resolve(prisma.business.findUnique({ where: { channelId: req.body.channel_id } }));
-        console.log("Jexy!!", business)
+        // Check if we have a valid channel_id in the request
+        if (!req.body.channel_id) {
+          logger.error("No channel_id provided in WhatsApp webhook", {
+            phoneNumber,
+            messageId: message.id
+          });
+          results.push({ 
+            success: false, 
+            phoneNumber,
+            error: "No channel_id provided - business registration required" 
+          });
+          continue;
+        }
+
+        const business = await prisma.business.findUnique({ 
+          where: { channelId: req.body.channel_id } 
+        });
+        
+        if (!business) {
+          logger.error("No business found for channel ID", {
+            channelId: req.body.channel_id,
+            phoneNumber,
+            messageId: message.id
+          });
+          results.push({ 
+            success: false, 
+            phoneNumber,
+            error: `No business registered for channel ID: ${req.body.channel_id}` 
+          });
+          continue;
+        }
+        
+        console.log("Found business:", business.id)
+        
         // Process each message and collect results
         const result = await processMessage(phoneNumber, messageText, business);
         results.push(result);

@@ -177,14 +177,21 @@ export async function processWebhookEvent(webhookEvent) {
     const recipientId = webhookEvent?.recipient?.id;
     console.log("Recipient ID:", recipientId)
     
+    // Validate that we have a recipient ID
+    if (!recipientId) {
+      logger.error("No recipient ID provided in Facebook webhook", {
+        senderId: senderId ? senderId.substring(0, 10) + "..." : "unknown"
+      });
+      return;
+    }
 
-    // If business is not provided, fetch it using the recipient ID
+    // Find business by recipient ID - strict validation
     const businessRecord = await prisma.business.findUnique({ 
       where: { recipientId: recipientId } 
     });
     
     if (!businessRecord) {
-      logger.error("No business found for recipient ID", {
+      logger.error("No business found for recipient ID - business registration required", {
         recipientId,
         senderId: senderId ? senderId.substring(0, 10) + "..." : "unknown"
       });
