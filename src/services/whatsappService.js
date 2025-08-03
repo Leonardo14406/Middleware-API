@@ -352,35 +352,48 @@ export async function sendWhatsAppMessage(phoneNumber, messageText, typingTime =
 }
 
 // WhatsApp webhook verification for Whapi setup
-export function verifyWhatsAppWebhook(req, res) {
-  const { 'hub.mode': mode, 'hub.verify_token': token, 'hub.challenge': challenge } = req.query;
-  // Get businessId from authenticated request (set by auth middleware)
-  const businessId = req.business?.businessId;
-  if (!businessId) {
-    logger.error('No businessId found in authenticated request');
-    return res.status(401).json({ error: 'Unauthorized: businessId missing' });
-  }
-  checkBusinessExists(businessId).then(business => {
-    const verifyToken = business.whatsappVerifyToken;
-    if (!verifyToken) {
-      logger.error('WHATSAPP_VERIFY_TOKEN not configured in business record');
-      return res.status(500).json({ error: 'Webhook verification token not configured' });
+export async function verifyWhatsAppWebhook(req, res) {
+  try {
+    const { 'hub.mode': mode, 'hub.verify_token': token, 'hub.challenge': challenge } = req.query;
+    
+    if (!token) {
+      logger.error('No verify token provided in WhatsApp webhook verification');
+      return res.status(400).json({ error: 'Verify token required' });
     }
-    if (mode === 'subscribe' && token === verifyToken) {
-      logger.info('WhatsApp webhook verified successfully');
+
+    // Check if token matches any business's WhatsApp verify token
+    const business = await prisma.business.findFirst({
+      where: {
+        whatsappVerifyToken: token
+      }
+    });
+
+    if (!business) {
+      logger.warn('WhatsApp webhook verification failed - no business found with matching token', { 
+        mode,
+        token: 'REDACTED'
+      });
+      return res.status(403).json({ error: 'Webhook verification failed' });
+    }
+
+    if (mode === 'subscribe') {
+      logger.info('WhatsApp webhook verified successfully', { 
+        businessId: business.id,
+        mode, 
+        challenge 
+      });
       res.status(200).send(challenge);
     } else {
-      logger.warn('WhatsApp webhook verification failed', { 
-        mode, 
-        tokenMatch: token === verifyToken,
-        expectedToken: verifyToken ? '***configured***' : 'not configured'
+      logger.warn('WhatsApp webhook verification failed - invalid mode', { 
+        mode,
+        businessId: business.id
       });
-      res.status(403).json({ error: 'Webhook verification failed' });
+      res.status(403).json({ error: 'Invalid verification mode' });
     }
-  }).catch(error => {
-    logger.error('Error fetching business for WhatsApp webhook verification', { error: error.message });
+  } catch (error) {
+    logger.error('Error during WhatsApp webhook verification', { error: error.message });
     res.status(500).json({ error: 'Failed to verify webhook' });
-  });
+  }
 }
 
 // Legacy compatibility functions for business controller integration

@@ -26,9 +26,9 @@ model Business {
   updatedAt    DateTime  @updatedAt
 
   facebookPageAccessToken String?
-  facebookVerifyToken     String?
+  facebookVerifyToken     String? @unique
   whatsappBearerToken     String?
-  whatsappVerifyToken     String?
+  whatsappVerifyToken     String? @unique
   instagramAccessToken    String?
 
   recipientId String? @unique // For Facebook Messenger recipient ID
