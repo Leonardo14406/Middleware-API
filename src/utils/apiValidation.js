@@ -1,7 +1,7 @@
 import asyncHandler from "express-async-handler";
 import { logger } from "./logger.js";
 
-export function metaWebhookAdapter({ verifyTokenEnv, querySchema, bodySchema, processEvent }) {
+export function metaWebhookAdapter({ verifyTokenEnv, verifyTokenValidator, querySchema, bodySchema, processEvent }) {
   return {
     verifyWebhook: asyncHandler(async (req, res) => {
       const { error, value } = querySchema.validate(req.query, { stripUnknown: true });
@@ -12,7 +12,18 @@ export function metaWebhookAdapter({ verifyTokenEnv, querySchema, bodySchema, pr
       const mode = value["hub.mode"];
       const token = value["hub.verify_token"];
       const challenge = value["hub.challenge"];
-      if (mode === "subscribe" && token === process.env[verifyTokenEnv]) {
+      
+      let isValidToken = false;
+      
+      if (verifyTokenValidator) {
+        // Use the custom validator function
+        isValidToken = await verifyTokenValidator(token);
+      } else if (verifyTokenEnv) {
+        // Fallback to environment variable check
+        isValidToken = token === process.env[verifyTokenEnv];
+      }
+      
+      if (mode === "subscribe" && isValidToken) {
         logger.info("Webhook verified successfully", { mode, challenge });
         res.status(200).send(challenge);
       } else {

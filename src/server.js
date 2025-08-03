@@ -32,7 +32,7 @@ const app = express();
 //       defaultSrc: ["'self'"],
 //       scriptSrc: ["'self'"],
 //       styleSrc: ["'self'", "'unsafe-inline'"],
-//       connectSrc: ["'self'", "ws://localhost:5001", "wss://localhost:5001", "http://localhost:5001", "https://genistud.io"]
+//       connec tSrc: ["'self'", "ws://localhost:5001", "wss://localhost:5001", "http://localhost:5001", "https://genistud.io"]
 //     }
 //   }
 // }));
