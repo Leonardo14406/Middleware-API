@@ -174,19 +174,25 @@ export async function sendMessage(business, recipientId, messageText) {
 export async function processWebhookEvent(webhookEvent) {
   try {
     const senderId = webhookEvent?.sender?.id;
-    console.log(webhookEvent?.recipient?.id)
+    const recipientId = webhookEvent?.recipient?.id;
+    console.log("Recipient ID:", recipientId)
     
 
-    // If business is not provided, fetch it using the environment variable
+    // If business is not provided, fetch it using the recipient ID
+    const businessRecord = await prisma.business.findUnique({ 
+      where: { recipientId: recipientId } 
+    });
     
-    const { id } = await prisma.business.findUnique({ where: { recipientId: webhookEvent?.recipient?.id } });
-    console.log("Zulu", id)
-    // const businessId = process.env.BUSINESS_ID;
-    if (!id) {
-      logger.error("No business object provided and no BUSINESS_ID in environment");
+    if (!businessRecord) {
+      logger.error("No business found for recipient ID", {
+        recipientId,
+        senderId: senderId ? senderId.substring(0, 10) + "..." : "unknown"
+      });
       return;
     }
-    const business = await checkBusinessExists(id);
+    
+    console.log("Found business:", businessRecord.id)
+    const business = await checkBusinessExists(businessRecord.id);
     console.log("Fetched business object:", business)
    
     
@@ -228,6 +234,8 @@ export async function processWebhookEvent(webhookEvent) {
   } catch (error) {
     logger.error("Error processing individual Facebook webhook event", {
       error: error && error.message ? error.message : String(error),
+      senderId: webhookEvent?.sender?.id ? webhookEvent.sender.id.substring(0, 10) + "..." : "unknown",
+      recipientId: webhookEvent?.recipient?.id,
       webhookEvent // Log the full event for debugging
     });
   }
