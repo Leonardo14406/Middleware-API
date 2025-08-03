@@ -1,0 +1,22 @@
+{
+  "watch": [
+    "src/",
+    ".nodemon-trigger",
+    "src/services/restart-trigger.js"
+  ],
+  "ext": "js,json",
+  "ignore": [
+    "node_modules/",
+    "test/",
+    "logs/",
+    "*.log"
+  ],
+  "delay": 500,
+  "env": {
+    "NODE_ENV": "development"
+  },
+  "verbose": true,
+  "restartable": "rs",
+  "colours": true,
+  "legacyWatch": false
+}

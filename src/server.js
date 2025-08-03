@@ -12,11 +12,10 @@ import webSocketRoutes from "./routes/webSocketRoutes.js";
 import whatsappRoutes from "./routes/whatsappRoute.js";
 import { pollingService } from "./services/pollingService.js";
 import { webChatSocketService } from "./services/webChatSocketService.js";
+import dbChangeMonitor from "./services/dbChangeMonitor.js";
+import requestTracker from "./middleware/requestTracker.js";
 import { logger } from "./utils/logger.js";
 
-// ES module __dirname equivalent
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 dotenv.config();
 const app = express();
@@ -39,6 +38,9 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Request tracking middleware (must be before routes)
+app.use(requestTracker.trackRequest());
+
 // Health check endpoint
 app.get('/', (req, res) => {
   res.json({ 
@@ -46,6 +48,22 @@ app.get('/', (req, res) => {
     message: 'Middleware API is running',
     timestamp: new Date().toISOString()
   });
+});
+
+// Test endpoint for graceful shutdown testing
+app.get('/test-long-request', async (req, res) => {
+  const duration = parseInt(req.query.duration) || 3000;
+  logger.info(`Starting long request test - duration: ${duration}ms`);
+  
+  await new Promise(resolve => setTimeout(resolve, duration));
+  
+  res.json({
+    status: 'completed',
+    message: `Request completed after ${duration}ms`,
+    timestamp: new Date().toISOString()
+  });
+  
+  logger.info(`Long request test completed - duration: ${duration}ms`);
 });
 
 // Routes
@@ -64,6 +82,9 @@ app.use((err, req, res, _next) => {
 // Create HTTP server
 const server = http.createServer(app);
 
+// Export server instance and request tracker for graceful shutdown
+export { server, requestTracker };
+
 // Initialize WebSocket service
 webChatSocketService.initialize(server);
 
@@ -80,4 +101,63 @@ server.listen(PORT, async () => {
   } catch (err) {
     logger.logError(err, { context: "Failed to start polling service" });
   }
+
+  try {
+    await dbChangeMonitor.start();
+    logger.info("Database change monitor started successfully");
+  } catch (err) {
+    logger.error("Failed to start database change monitor", { 
+      error: err.message,
+      code: err.code 
+    });
+    logger.warn("Server will continue running without database change monitoring");
+    logger.info("Database change monitoring will be retried automatically when database becomes available");
+  }
+});
+
+// Graceful shutdown handling
+process.on('SIGINT', async () => {
+  logger.info('Received SIGINT, shutting down gracefully...');
+  
+  dbChangeMonitor.stop();
+  
+  // Stop accepting new connections
+  server.close(async () => {
+    logger.info('Server stopped accepting new connections');
+    
+    // Wait for active requests to complete
+    await requestTracker.waitForAllRequests(10000);
+    
+    logger.info('Server closed gracefully');
+    process.exit(0);
+  });
+  
+  // Force exit after timeout
+  setTimeout(() => {
+    logger.warn('Graceful shutdown timeout - forcing exit');
+    process.exit(1);
+  }, 15000);
+});
+
+process.on('SIGTERM', async () => {
+  logger.info('Received SIGTERM, shutting down gracefully...');
+  
+  dbChangeMonitor.stop();
+  
+  // Stop accepting new connections
+  server.close(async () => {
+    logger.info('Server stopped accepting new connections');
+    
+    // Wait for active requests to complete
+    await requestTracker.waitForAllRequests(10000);
+    
+    logger.info('Server closed gracefully');
+    process.exit(0);
+  });
+  
+  // Force exit after timeout
+  setTimeout(() => {
+    logger.warn('Graceful shutdown timeout - forcing exit');
+    process.exit(1);
+  }, 15000);
 });

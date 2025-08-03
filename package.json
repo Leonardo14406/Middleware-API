@@ -8,6 +8,10 @@
     "dev": "nodemon src/server.js",
     "test-chatbot": "node test-chatbot.js",
     "test-whatsapp": "node test-whatsapp.js",
+    "test-db-monitor": "node test-db-monitor.js",
+    "test-graceful-shutdown": "node test-graceful-shutdown.js",
+    "test-file-restart": "node test-file-restart.js",
+    "test-database": "node test-database.js",
     "start-testing": "node start-testing.js"
   },
   "keywords": [],

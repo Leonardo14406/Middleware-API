@@ -7,3 +7,6 @@ node_modules/
 bun.lock
 yarn.lock
 
+# Database change monitor trigger files
+.nodemon-trigger
+
