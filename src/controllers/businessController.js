@@ -88,7 +88,7 @@ export async function addPlatformCredentials(req, res) {
         });
         await prisma.business.update({
           where: { id: businessId },
-          data: { igUsername: instagramUsername },
+          data: { instagramUsername: instagramUsername },
         });
         await pollingService.startPolling(businessId);
         platformResults.instagram = true;
@@ -178,7 +178,7 @@ export async function getBusinessStatus(req, res) {
         businessName: business.businessName,
         email: business.email,
         chatbotId: business.chatbotId,
-        igUsername: business.igUsername || null,
+        instagramUsername: business.instagramUsername || null,
         createdAt: business.createdAt,
         updatedAt: business.updatedAt,
       },
@@ -243,7 +243,7 @@ export async function removePlatformCredentials(req, res) {
 
     const data = {};
     if (platforms.includes('INSTAGRAM')) {
-      data.igUsername = null;
+      data.instagramUsername = null;
       await pollingService.stopPolling(businessId);
     }
     if (platforms.includes('FACEBOOK')) {

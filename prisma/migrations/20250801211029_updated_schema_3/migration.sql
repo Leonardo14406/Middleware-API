@@ -1,15 +1,15 @@
 /*
   Warnings:
 
-  - You are about to drop the column `igUsername` on the `businesses` table. All the data in the column will be lost.
+  - You are about to drop the column `instagramUsername` on the `businesses` table. All the data in the column will be lost.
   - A unique constraint covering the columns `[instagramUsername]` on the table `businesses` will be added. If there are existing duplicate values, this will fail.
 
 */
 -- DropIndex
-DROP INDEX "businesses_igUsername_key";
+DROP INDEX "businesses_instagramUsername_key";
 
 -- AlterTable
-ALTER TABLE "businesses" DROP COLUMN "igUsername",
+ALTER TABLE "businesses" DROP COLUMN "instagramUsername",
 ADD COLUMN     "facebookAccessToken" TEXT,
 ADD COLUMN     "facebookVerifyToken" TEXT,
 ADD COLUMN     "instagramPassword" TEXT,

@@ -93,24 +93,81 @@ async function fetchRecentMessages(ig, limit = 20) {
   }
 }
 
-async function sendMessage(ig, threadId, text) {
+async function sendMessage(ig, threadId, text, targetUserId = null) {
   const requestId = `ig_send_${Date.now()}`;
   const startTime = Date.now();
-
-  logger.info('Sending message to Instagram', {
-    requestId,
-    threadId,
+  const logContext = { 
+    requestId, 
+    threadId, 
+    targetUserId,
+    currentUserId: ig.state.cookieUserId,
     textLength: text.length,
-    textPreview: text.substring(0, 100) + (text.length > 100 ? '...' : ''),
-  });
+    textPreview: text.substring(0, 100) + (text.length > 100 ? '...' : '')
+  };
+
+  logger.info('Sending message to Instagram', logContext);
 
   try {
+    // Verify thread exists and get its details
+    const direct = ig.feed.directInbox();
+    const threads = await direct.items();
+    const targetThread = threads.find(t => t.thread_id === threadId);
+
+    logger.debug('Thread search results', {
+      ...logContext,
+      totalThreads: threads.length,
+      foundThread: !!targetThread,
+      threadIds: threads.map(t => t.thread_id)
+    });
+
+    if (!targetThread) {
+      logger.error('Thread not found', logContext);
+      throw new Error(`Thread ${threadId} not found`);
+    }
+
+    // Log thread-user mapping for debugging
+    const threadUsers = targetThread.users.map(u => ({
+      userId: u.pk,
+      username: u.username,
+      fullName: u.full_name,
+      isSelf: u.pk === ig.state.cookieUserId
+    }));
+
+    const threadInfo = {
+      ...logContext,
+      threadUsers,
+      isGroup: targetThread.is_group,
+      threadV2Id: targetThread.thread_v2_id,
+      lastActivity: targetThread.last_activity ? new Date(targetThread.last_activity / 1000).toISOString() : null,
+      messageCount: targetThread.items?.length || 0,
+      hasOlder: targetThread.has_older,
+      hasNewer: targetThread.has_newer,
+      isPin: targetThread.is_pin,
+      isSpam: targetThread.is_spam,
+      isCloseFriends: targetThread.is_close_friend_thread,
+      isVerified: targetThread.users.some(u => u.is_verified)
+    };
+
+    logger.debug('Thread details', threadInfo);
+
+    // Validate thread-user mapping if targetUserId is provided
+    if (targetUserId) {
+      const isValidThread = targetThread.users.some(user => user.pk === targetUserId);
+      if (!isValidThread) {
+        throw new Error(`Thread ${threadId} does not belong to user ${targetUserId}`);
+      }
+    }
+
     const thread = ig.entity.directThread(threadId);
     const result = await withRetry(() => thread.broadcastText(text));
+    
     logger.info('Successfully sent message to Instagram', {
       requestId,
       threadId,
+      targetUserId,
       timeElapsed: `${Date.now() - startTime}ms`,
+      threadUserCount: targetThread.users.length,
+      isGroup: targetThread.is_group
     });
     return result;
   } catch (err) {

@@ -10,7 +10,7 @@ DROP TABLE IF EXISTS "InstagramAccount" CASCADE;
 -- CreateTable
 CREATE TABLE IF NOT EXISTS "businesses" (
     "id" TEXT NOT NULL,
-    "igUsername" TEXT NOT NULL,
+    "instagramUsername" TEXT NOT NULL,
     "chatbotId" TEXT NOT NULL,
     "email" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS "messages" (
 );
 
 -- CreateIndex
-CREATE UNIQUE INDEX IF NOT EXISTS "businesses_igUsername_key" ON "businesses"("igUsername");
+CREATE UNIQUE INDEX IF NOT EXISTS "businesses_instagramUsername_key" ON "businesses"("instagramUsername");
 
 -- CreateIndex
 CREATE UNIQUE INDEX IF NOT EXISTS "sessions_businessId_key" ON "sessions"("businessId");

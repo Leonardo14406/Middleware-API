@@ -7,7 +7,7 @@ import { webChatSocketService } from './webChatSocketService.js';
 class PollingService {
   constructor() {
     this.pollers = new Map();
-    this.basePollInterval = 30000; // 30 seconds base
+    this.basePollInterval = 4000; 
   }
 
   async startPolling(businessId) {
@@ -71,62 +71,166 @@ class PollingService {
       sessionId: session.id,
       expiresAt: session.expiresAt,
     });
-
+  
     const ig = new IgApiClient();
-    ig.state.generateDevice(`${business.igUsername}-${Math.random().toString(36).substring(2)}`);
-
+    ig.state.generateDevice(`${business.instagramUsername}-${Math.random().toString(36).substring(2)}`);
+  
     try {
       await withRetry(() => ig.state.deserialize(session.serializedCookies));
       const direct = ig.feed.directInbox();
       const threads = await direct.items();
-
+  
       let processedCount = 0;
       for (const thread of threads.slice(0, 5)) {
         const lastMessage = thread.items[0];
-        if (!lastMessage || lastMessage.item_type !== 'text' || lastMessage.user_id === ig.state.cookieUserId) continue;
-
-        const lastProcessed = await prisma.message.findFirst({
-          where: { threadId: thread.thread_id, businessId: business.id },
-          orderBy: { timestamp: 'desc' },
-        });
-
-        if (lastProcessed && lastProcessed.messageId === lastMessage.item_id) continue;
-
-        await enqueueMessage({
-          businessId: business.id,
-          threadId: thread.thread_id,
-          messageText: lastMessage.text,
-          userId: thread.users[0].pk,
+        const isOutgoing = lastMessage.user_id === ig.state.cookieUserId;
+        
+        // Log message details
+        logger.debug('Processing message', {
+          pollId,
           messageId: lastMessage.item_id,
-          timestamp: new Date(lastMessage.timestamp / 1000).getTime(),
-          chatbotId: business.chatbotId,
-          platform: 'INSTAGRAM',
+          threadId: thread.thread_id,
+          userId: lastMessage.user_id,
+          isOutgoing,
+          messageType: lastMessage.item_type,
+          timestamp: new Date(lastMessage.timestamp / 1000).toISOString(),
+          textPreview: lastMessage.text?.substring(0, 100) + (lastMessage.text?.length > 100 ? '...' : '')
         });
 
-        await prisma.message.create({
+        if (isOutgoing) {
+          logger.debug('Skipping bot message', { 
+            messageId: lastMessage.item_id, 
+            threadId: thread.thread_id,
+            userId: lastMessage.user_id,
+            isOutgoing: true
+          });
+          continue;
+        }
+
+        // Log thread-user mapping for debugging
+        const threadUsers = thread.users.map(u => ({
+          userId: u.pk,
+          username: u.username,
+          isSelf: u.pk === ig.state.cookieUserId
+        }));
+
+        logger.debug('Processing thread', {
+          pollId,
+          threadId: thread.thread_id,
+          threadUsers,
+          isGroup: thread.is_group,
+          messageCount: thread.items.length,
+          lastMessageId: lastMessage.item_id,
+          lastMessageFrom: lastMessage.user_id
+        });
+  
+        // Check if the message already exists in the database
+        const existingMessage = await prisma.message.findFirst({
+          where: {
+            businessId: business.id,
+            threadId: thread.thread_id,
+            messageId: lastMessage.item_id,
+          },
+        });
+        
+        if (existingMessage) {
+          logger.debug('Message already processed', { 
+            messageId: lastMessage.item_id, 
+            threadId: thread.thread_id,
+            existingMessageId: existingMessage.id
+          });
+          continue;
+        }
+
+        // Prepare message content - handle cases where text might be missing
+        const messageContent = lastMessage.text || 
+                             (lastMessage.link && lastMessage.link.text) || 
+                             `[${lastMessage.item_type} message]`;
+
+        // Create or update thread metadata
+        await prisma.threadMetadata.upsert({
+          where: {
+            businessId_threadId: {
+              businessId: business.id,
+              threadId: thread.thread_id
+            }
+          },
+          update: {
+            isGroup: thread.is_group,
+            users: thread.users.map(u => ({
+              userId: u.pk,
+              username: u.username,
+              fullName: u.full_name,
+              isSelf: u.pk === ig.state.cookieUserId
+ })),
+            lastUpdated: new Date()
+          },
+          create: {
+            businessId: business.id,
+            threadId: thread.thread_id,
+            isGroup: thread.is_group,
+            users: thread.users.map(u => ({
+              userId: u.pk,
+              username: u.username,
+              fullName: u.full_name,
+              isSelf: u.pk === ig.state.cookieUserId
+            }))
+          }
+        });
+
+        // Only process new messages
+        const newMessage = await prisma.message.create({
           data: {
             businessId: business.id,
             threadId: thread.thread_id,
             messageId: lastMessage.item_id,
-            content: lastMessage.text,
+            content: messageContent,
             isIncoming: true,
             timestamp: new Date(lastMessage.timestamp / 1000),
             createdAt: new Date(),
+            // No more metadata here, it's now in ThreadMetadata
           },
         });
 
+        logger.debug('Created new message record', {
+          messageId: newMessage.id,
+          threadId: thread.thread_id,
+          businessId: business.id
+        });
+  
+        await enqueueMessage({
+          businessId: business.id,
+          threadId: thread.thread_id,
+          messageText: lastMessage.text,
+          userId: lastMessage.user_id, // Use the actual message sender's ID
+          messageId: lastMessage.item_id,
+          timestamp: new Date(lastMessage.timestamp / 1000).getTime(),
+          chatbotId: business.chatbotId,
+          platform: 'INSTAGRAM',
+          threadUsers: thread.users.map(u => ({
+            id: u.pk,
+            username: u.username,
+            fullName: u.full_name
+          }))
+        });
+  
         this.broadcastNewMessage(business, {
           threadId: thread.thread_id,
           messageId: lastMessage.item_id,
           content: lastMessage.text,
           timestamp: new Date(lastMessage.timestamp / 1000).toISOString(),
-          senderId: thread.users[0].pk,
+          senderId: lastMessage.user_id, // Use the actual message sender's ID
           isIncoming: true,
+          threadUsers: thread.users.map(u => ({
+            id: u.pk,
+            username: u.username,
+            fullName: u.full_name
+          }))
         }, 'INSTAGRAM', pollId);
-
+  
         processedCount++;
       }
-
+  
       logger.info('Completed Instagram poll', {
         pollId,
         businessId: business.id,
@@ -137,12 +241,11 @@ class PollingService {
       if (error.message.includes('login_required')) {
         logger.warn('Instagram session invalid or account may be banned', { pollId, businessId: business.id });
         await prisma.session.deleteMany({ where: { businessId: business.id, platform: 'INSTAGRAM' } });
-        await prisma.business.update({ where: { id: business.id }, data: { igUsername: null } });
+        await prisma.business.update({ where: { id: business.id }, data: { instagramUsername: null } });
       }
       throw error;
     }
   }
-
   broadcastNewMessage(business, msg, platform, pollId) {
     try {
       webChatSocketService.broadcastToBusinessClients(business.chatbotId, {

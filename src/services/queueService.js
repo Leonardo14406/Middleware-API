@@ -10,8 +10,23 @@ let channel;
 export async function initQueue() {
   const conn = await amqp.connect(process.env.RABBITMQ_URL);
   channel = await conn.createChannel();
-  await channel.assertQueue('instagram_messages', { durable: true });
-  logger.info('Message queue initialized');
+  
+  // Delete the existing queue to avoid TTL mismatch
+  try {
+    await channel.deleteQueue('instagram_messages');
+  } catch (err) {
+    logger.info('No existing queue to delete or error deleting queue', { error: err.message });
+  }
+  
+  // Create queue with TTL configuration
+  await channel.assertQueue('instagram_messages', { 
+    durable: true,
+    arguments: {
+      'x-message-ttl': 86400000 // 24 hours in milliseconds
+    }
+  });
+  
+  logger.info('Message queue initialized with TTL');
 }
 
 export async function enqueueMessage(message) {
@@ -67,7 +82,7 @@ export async function startQueueWorker() {
       if (err.message.includes('login_required')) {
         logger.warn('Instagram session invalid or account may be banned', { processId, businessId });
         await prisma.session.deleteMany({ where: { businessId, platform: 'INSTAGRAM' } });
-        await prisma.business.update({ where: { id: businessId }, data: { igUsername: null } });
+        await prisma.business.update({ where: { id: businessId }, data: { instagramUsername: null } });
       }
       logger.logError(err, { context: 'processMessage', processId, businessId, threadId });
       channel.nack(msg, false, true);

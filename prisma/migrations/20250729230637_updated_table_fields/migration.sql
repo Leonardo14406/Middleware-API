@@ -9,7 +9,7 @@
 -- AlterTable
 ALTER TABLE "businesses" ADD COLUMN     "businessName" TEXT NOT NULL,
 ADD COLUMN     "password" TEXT NOT NULL,
-ALTER COLUMN "igUsername" DROP NOT NULL;
+ALTER COLUMN "instagramUsername" DROP NOT NULL;
 
 -- CreateIndex
 CREATE UNIQUE INDEX "businesses_email_key" ON "businesses"("email");

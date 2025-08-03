@@ -25,15 +25,16 @@ model Business {
   lastPolledAt DateTime? @default(now())
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
-  facebookAccessToken String?
+  facebookPageAccessToken String?
   facebookVerifyToken String?
   whatsappBearerToken String? 
   whatsappVerifyToken String?
   instagramPassword   String?
 
   // Relations
-  sessions   Session[]
-  messages   Message[]
+  sessions       Session[]
+  messages       Message[]
+  threadMetadata ThreadMetadata[]
 
   @@map("businesses")
 }
@@ -66,8 +67,28 @@ model Message {
 
   // Relations
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  // Temporarily removing the thread relation to fix migration
+  // thread   ThreadMetadata? @relation(fields: [businessId, threadId], references: [businessId, threadId])
 
   @@map("messages")
+}
+
+model ThreadMetadata {
+  businessId  String
+  threadId    String
+  isGroup     Boolean    @default(false)
+  lastUpdated DateTime   @default(now())
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  users       Json       @default("[]")
+  
+  // Relations
+  business    Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  // Temporarily removing messages relation to fix migration
+  // messages    Message[]
+
+  @@id([businessId, threadId])
+  @@map("thread_metadata")
 }
 
 // Enums
