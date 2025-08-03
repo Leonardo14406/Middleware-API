@@ -1,100 +1,117 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// Prisma schema file for chatbot middleware service
+// Learn more: https://pris.ly/d/prisma-schema
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider  = "postgresql"
-  url       = env("DATABASE_URL")
-  directUrl = env("DIRECT_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
 }
 
+///////////////////////////
+// ENUMS
+///////////////////////////
 
-model Business {
-  id           String    @id @default(cuid())
-  businessName String
-  email        String    @unique
-  password     String
-  chatbotId    String
-  instagramUsername   String?   @unique
-  lastPolledAt DateTime? @default(now())
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  facebookPageAccessToken String?
-  facebookVerifyToken String?
-  whatsappBearerToken String? 
-  whatsappVerifyToken String?
-  instagramPassword   String?
-
-  // Relations
-  sessions       Session[]
-  messages       Message[]
-  threadMetadata ThreadMetadata[]
-
-  @@map("businesses")
-}
-
-model Session {
-  id                String    @id @default(cuid())
-  businessId        String
-  platform          Platform
-  serializedCookies String    @db.Text
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
-  expiresAt         DateTime?  @default(dbgenerated("now() + interval '30 days'"))
-
-  // Relations
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-
-  @@unique([businessId, platform]) // One session per platform per business
-  @@map("sessions")
-}
-
-model Message {
-  id         String    @id @default(cuid())
-  businessId String
-  threadId   String
-  messageId  String
-  content    String    @db.Text
-  isIncoming Boolean   @default(true)
-  timestamp  DateTime  @default(now())
-  createdAt  DateTime  @default(now())
-
-  // Relations
-  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  // Temporarily removing the thread relation to fix migration
-  // thread   ThreadMetadata? @relation(fields: [businessId, threadId], references: [businessId, threadId])
-
-  @@map("messages")
-}
-
-model ThreadMetadata {
-  businessId  String
-  threadId    String
-  isGroup     Boolean    @default(false)
-  lastUpdated DateTime   @default(now())
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  users       Json       @default("[]")
-  
-  // Relations
-  business    Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  // Temporarily removing messages relation to fix migration
-  // messages    Message[]
-
-  @@id([businessId, threadId])
-  @@map("thread_metadata")
-}
-
-// Enums
 enum Platform {
   INSTAGRAM
   FACEBOOK
   WHATSAPP
   WEBSITE
+}
+
+///////////////////////////
+// MODELS
+///////////////////////////
+
+// Business model for storing client business details and platform credentials
+model Business {
+  id                        String         @id @default(cuid())
+  businessName              String
+  email                     String         @unique
+  password                  String
+  chatbotId                 String
+
+  // Platform credentials
+  instagramUsername         String?        @unique
+  facebookPageAccessToken   String?
+  facebookVerifyToken       String?
+  whatsappBearerToken       String?
+  whatsappVerifyToken       String?
+
+  // Polling info
+  lastPolledAt              DateTime?      @default(now())
+
+  // Timestamps
+  createdAt                 DateTime       @default(now())
+  updatedAt                 DateTime       @updatedAt
+
+  // Relations
+  sessions                  Session[]
+  messages                  Message[]
+  threadMetadata            ThreadMetadata[]
+
+  @@map("businesses")
+}
+
+// Session model for storing Instagram/Facebook/WhatsApp auth state
+model Session {
+  id                String     @id @default(cuid())
+  businessId        String
+  platform          Platform
+  serializedCookies String     @db.Text
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  expiresAt         DateTime?
+
+  // Relations
+  business          Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, platform])
+  @@map("sessions")
+}
+
+// Message model stores all inbound and outbound messages across platforms
+model Message {
+  id          String   @id @default(cuid())
+  businessId  String
+  platform    Platform
+  threadId    String
+  userId      String
+  content     String   @db.Text
+  isIncoming  Boolean  @default(true)
+  timestamp   DateTime @default(now())
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  threadMetadata ThreadMetadata @relation(fields: [businessId, platform, threadId], references: [businessId, platform, threadId], onDelete: Restrict)
+
+  @@unique([businessId, platform, threadId, id])
+  @@map("messages")
+}
+
+
+// ThreadMetadata model stores chat thread/session metadata
+model ThreadMetadata {
+  businessId String
+  platform   Platform
+  threadId   String
+
+  isGroup           Boolean  @default(false)
+  lastMessageId     String?
+  lastProcessedAt   DateTime?
+  users             Json     @default("[]")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Add reverse relation
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  messages Message[]
+
+  @@id([businessId, platform, threadId])
+  @@map("thread_metadata")
 }
